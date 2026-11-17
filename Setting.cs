@@ -2,6 +2,7 @@ using Colossal;
 using Colossal.IO.AssetDatabase;
 using Game.Modding;
 using Game.Settings;
+using Game.SceneFlow;
 using System.Collections.Generic;
 
 namespace VehicleCapUnlock
@@ -11,10 +12,10 @@ namespace VehicleCapUnlock
     {
         public const string kSection = "Main";
 
-        private bool m_EnableUnlock = true;
-        private int m_VehicleLimitMultiplier = 5;
-        private bool m_ScaleDepotCapacity = true;
-        private int m_DepotMultiplier = 5;
+        private bool m_EnableUnlock;
+        private int m_VehicleLimitMultiplier = 1;
+        private bool m_ScaleDepotCapacity;
+        private int m_DepotMultiplier = 1;
 
         public Setting(IMod mod) : base(mod)
         {
@@ -40,6 +41,7 @@ namespace VehicleCapUnlock
             get => m_VehicleLimitMultiplier;
             set
             {
+                value = System.Math.Max(1, System.Math.Min(10, value));
                 if (m_VehicleLimitMultiplier == value) return;
                 m_VehicleLimitMultiplier = value;
                 Systems.LineCeilingSystem.RequestReapply();
@@ -65,18 +67,54 @@ namespace VehicleCapUnlock
             get => m_DepotMultiplier;
             set
             {
+                value = System.Math.Max(1, System.Math.Min(10, value));
                 if (m_DepotMultiplier == value) return;
                 m_DepotMultiplier = value;
                 Systems.DepotCapacitySystem.RequestReapply();
             }
         }
 
+        [SettingsUIButton]
+        [SettingsUIConfirmation("VehicleCapUnlock.PREPARE_UNLOAD_CONFIRM",
+            "Disable both features, restore owned ranges/capacities and clamp this city's saved line adjustments to their initial bounds? Save a copy only after both statuses report prepared.")]
+        [SettingsUISection(kSection)]
+        public bool PrepareUnload
+        {
+            set
+            {
+                if (!Systems.LineCeilingSystem.HasLoadedCity)
+                {
+                    Mod.s_Log.Warn("[准备卸载] 请先加载测试城市");
+                    return;
+                }
+                EnableUnlock = false;
+                VehicleLimitMultiplier = 1;
+                ScaleDepotCapacity = false;
+                DepotMultiplier = 1;
+                Systems.LineCeilingSystem.RequestPrepareUnload();
+                Systems.DepotCapacitySystem.RequestPrepareUnload();
+                ApplyAndSave();
+            }
+        }
+
+        [SettingsUIMultilineText("")]
+        [SettingsUISection(kSection)]
+        public string SafetyStatus => Translate("Lines") + ": " + Translate(Systems.LineCeilingSystem.StatusKey) +
+            "\n" + Translate("Depots") + ": " + Translate(Systems.DepotCapacitySystem.StatusKey);
+
+        private static string Translate(string key)
+        {
+            var manager = GameManager.instance?.localizationManager;
+            return manager?.activeDictionary != null && manager.activeDictionary.TryGetValue("VehicleCapUnlock.STATUS." + key, out string text)
+                ? text : key;
+        }
+
         public override void SetDefaults()
         {
-            EnableUnlock = true;
-            VehicleLimitMultiplier = 5;
-            ScaleDepotCapacity = true;
-            DepotMultiplier = 5;
+            EnableUnlock = false;
+            VehicleLimitMultiplier = 1;
+            ScaleDepotCapacity = false;
+            DepotMultiplier = 1;
         }
     }
 
@@ -118,11 +156,23 @@ namespace VehicleCapUnlock
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ScaleDepotCapacity)), "Scale depot capacity" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ScaleDepotCapacity)),
-                  "Depots must be able to hold the extra vehicles, otherwise they never spawn. Turn off only if another mod already does this." },
+                  "Optional and off by default. Only proven passenger-only facilities are enlarged; cargo, shared and unknown facilities are skipped." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.DepotMultiplier)), "Depot capacity" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.DepotMultiplier)),
-                  "Multiplier applied to bus / tram / subway / train / ship / ferry / airplane depot vehicle capacity." },
+                  "Scales proven passenger-only depot families. Cargo, shared/unknown facilities and repeatable capacity upgrades are skipped." },
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.PrepareUnload)), "Prepare current city for removal" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.PrepareUnload)), "Disables both features, restores owned data and clamps saved per-line adjustments. Resume simulation, wait for both statuses to report prepared, then save a COPY before removing the mod. Conflicts or failures block completion." },
+                { "VehicleCapUnlock.PREPARE_UNLOAD_CONFIRM", "Disable both features, restore owned data and clamp saved per-line adjustments? This reduces above-limit settings in the current city. Save a copy only after both statuses report prepared." },
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.SafetyStatus)), "Current status" },
+                { "VehicleCapUnlock.STATUS.Lines", "Lines" },
+                { "VehicleCapUnlock.STATUS.Depots", "Depots" },
+                { "VehicleCapUnlock.STATUS.NoCity", "No city loaded" },
+                { "VehicleCapUnlock.STATUS.Pending", "Pending: resume simulation" },
+                { "VehicleCapUnlock.STATUS.Applied", "Settings applied (removal not prepared)" },
+                { "VehicleCapUnlock.STATUS.Prepared", "Prepared: save a copy before removal" },
+                { "VehicleCapUnlock.STATUS.Conflict", "Conflict: completion blocked; see mod log" },
+                { "VehicleCapUnlock.STATUS.Failed", "Failed: do not save; see mod log" },
             };
         }
 
@@ -153,11 +203,23 @@ namespace VehicleCapUnlock
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ScaleDepotCapacity)), "同步放大车库容量" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ScaleDepotCapacity)),
-                  "车库装不下就不会出车。只在已有其他模组负责容量时才需要关掉。" },
+                  "可选功能，默认关闭。仅扩容能确认属于客运的设施；共用车库、货运设施或用途不明的资产会跳过。" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.DepotMultiplier)), "车库容量倍率" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.DepotMultiplier)),
-                  "作用于公交 / 有轨 / 地铁 / 火车 / 船 / 轮渡 / 飞机车库的载具容量。" },
+                  "相对于首次基线扩容。客货混用、用途未知或可重复容量升级的设施会跳过；零值、负值和溢出容量不会被强制改成其他值。" },
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.PrepareUnload)), "准备卸载（当前城市）" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.PrepareUnload)), "关闭两项功能，还原本 mod 仍持有的数据，并把当前城市超限的逐线路设置收回初始范围。恢复模拟，等待两项状态均显示已准备，再另存副本后移除 mod。有冲突或失败时不能视为完成。" },
+                { "VehicleCapUnlock.PREPARE_UNLOAD_CONFIRM", "关闭两项功能、还原受管数据并收回当前城市超限的逐线路设置？这会减少当前城市的超限配车设置。等待两项状态均为已准备后，再另存副本。" },
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.SafetyStatus)), "当前状态" },
+                { "VehicleCapUnlock.STATUS.Lines", "线路" },
+                { "VehicleCapUnlock.STATUS.Depots", "车库" },
+                { "VehicleCapUnlock.STATUS.NoCity", "尚未加载城市" },
+                { "VehicleCapUnlock.STATUS.Pending", "等待处理，请恢复模拟" },
+                { "VehicleCapUnlock.STATUS.Applied", "已按设置处理（未准备卸载）" },
+                { "VehicleCapUnlock.STATUS.Prepared", "已准备，请另存副本后卸载" },
+                { "VehicleCapUnlock.STATUS.Conflict", "存在冲突，未完成，请查看 mod 日志" },
+                { "VehicleCapUnlock.STATUS.Failed", "处理失败，请勿保存，查看 mod 日志" },
             };
         }
 

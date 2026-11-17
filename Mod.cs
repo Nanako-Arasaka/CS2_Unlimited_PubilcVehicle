@@ -36,8 +36,10 @@ namespace VehicleCapUnlock
         {
             s_Log.Info("VehicleCapUnlock: OnDispose");
             // Restore synchronously while the ECS World is still available.
-            Systems.LineCeilingSystem.RestoreAllNow();
-            Systems.DepotCapacitySystem.RestoreAllNow();
+            bool linesRestored = Systems.LineCeilingSystem.RestoreAllNow();
+            bool depotsRestored = Systems.DepotCapacitySystem.RestoreAllNow();
+            if (!linesRestored || !depotsRestored)
+                s_Log.Warn($"[还原未完成] lines={linesRestored}; depots={depotsRestored}; 不应把本次退出视为完成卸载清理");
             s_Setting?.UnregisterInOptionsUI();
             s_Setting = null;
         }
