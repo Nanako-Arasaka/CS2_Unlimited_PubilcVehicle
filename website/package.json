@@ -1,0 +1,17 @@
+{
+  "name": "vehicle-cap-unlock-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bilingual static product page for the VehicleCapUnlock Cities: Skylines II mod.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs dist",
+    "test:ui": "node scripts/validate-browser.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

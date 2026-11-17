@@ -1,0 +1,41 @@
+{
+  "name": "VehicleCapUnlock",
+  "displayName": {
+    "zh": "公共交通配车上限解锁",
+    "en": "Vehicle Cap Unlock"
+  },
+  "version": null,
+  "status": "preview",
+  "updated": "2026-11-17",
+  "distribution": {
+    "paradoxMods": null,
+    "github": "https://github.com/Nanako-Arasaka/CS2_Unlimited_PubilcVehicle",
+    "readme": "https://github.com/Nanako-Arasaka/CS2_Unlimited_PubilcVehicle/blob/main/README.md#%E6%9E%84%E5%BB%BA",
+    "validation": "https://github.com/Nanako-Arasaka/CS2_Unlimited_PubilcVehicle/blob/main/docs/VALIDATION.md",
+    "safety": "https://github.com/Nanako-Arasaka/CS2_Unlimited_PubilcVehicle/blob/main/docs/SAFETY_FIXES.md"
+  },
+  "gameVersion": null,
+  "type": "Code Mod",
+  "platform": "PC",
+  "author": "Nanako-Arasaka",
+  "license": null,
+  "supports": ["bus", "tram", "subway", "train", "ship", "ferry", "airplane"],
+  "settings": [
+    { "key": "unlockCap", "default": false, "range": "boolean" },
+    { "key": "lineCapMultiple", "default": 1, "range": [1, 10] },
+    { "key": "scaleGarage", "default": false, "range": "boolean" },
+    { "key": "garageMultiple", "default": 1, "range": [1, 10] }
+  ],
+  "validation": {
+    "asOf": "2026-11-17",
+    "items": [
+      { "id": "build", "state": "done" },
+      { "id": "math", "state": "done" },
+      { "id": "safety", "state": "done" },
+      { "id": "slider", "state": "pending" },
+      { "id": "dispatch", "state": "pending" },
+      { "id": "save", "state": "pending" },
+      { "id": "restore", "state": "pending" }
+    ]
+  }
+}
