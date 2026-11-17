@@ -122,7 +122,7 @@ namespace VehicleCapUnlock
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.DepotMultiplier)), "Depot capacity" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.DepotMultiplier)),
-                  "Multiplier applied to bus / tram / subway / train / ship / ferry depot vehicle capacity." },
+                  "Multiplier applied to bus / tram / subway / train / ship / ferry / airplane depot vehicle capacity." },
             };
         }
 
@@ -157,7 +157,7 @@ namespace VehicleCapUnlock
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.DepotMultiplier)), "车库容量倍率" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.DepotMultiplier)),
-                  "作用于公交 / 有轨 / 地铁 / 火车 / 船 / 轮渡车库的载具容量。" },
+                  "作用于公交 / 有轨 / 地铁 / 火车 / 船 / 轮渡 / 飞机车库的载具容量。" },
             };
         }
 

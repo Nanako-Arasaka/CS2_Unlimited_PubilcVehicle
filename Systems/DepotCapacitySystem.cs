@@ -8,119 +8,137 @@ using Unity.Entities;
 
 namespace VehicleCapUnlock.Systems
 {
-    /// <summary>
-    /// 放大各类交通车库的载具容量。
-    ///
-    /// 车库容量是「物理出车上限」——滑块拉得再高，车库装不下就不会出车。
-    /// 对应字段：TransportDepotData.m_VehicleCapacity（prefab 上的 ECS 组件，模拟层直接读它）。
-    /// 原版基准值在另一个托管组件 TransportDepot 上，这里改成「首次运行时抓取快照」，
-    /// 保证反复应用不会叠乘（这也是 All Transit + Trucks 的做法）。
-    /// </summary>
     public partial class DepotCapacitySystem : GameSystemBase
     {
-        private static readonly Dictionary<Entity, int> s_Originals = new Dictionary<Entity, int>();
-        private static bool s_PendingApply = true;
-        private static bool s_PendingRestore;
+        private sealed class Snapshot
+        {
+            public PrefabBase Prefab;
+            public int Capacity;
+        }
 
+        private static readonly HashSet<DepotCapacitySystem> s_Instances = new HashSet<DepotCapacitySystem>();
+        private readonly Dictionary<Entity, Snapshot> m_Originals = new Dictionary<Entity, Snapshot>();
+        private bool m_PendingApply = true;
+        private bool m_Active = true;
         private EntityQuery m_DepotQuery;
+        private PrefabSystem m_PrefabSystem;
 
-        public static void RequestReapply() { s_PendingApply = true; }
-        public static void RequestRestore() { s_PendingRestore = true; }
+        public static void RequestReapply()
+        {
+            foreach (var system in s_Instances) system.m_PendingApply = true;
+        }
+
+        public static void ResumeAll()
+        {
+            foreach (var system in s_Instances)
+            {
+                system.m_Active = true;
+                system.m_PendingApply = true;
+            }
+        }
+
+        public static void RestoreAllNow()
+        {
+            foreach (var system in s_Instances)
+            {
+                system.m_Active = false;
+                system.RestoreNow();
+            }
+        }
 
         protected override void OnCreate()
         {
             base.OnCreate();
-
-            m_DepotQuery = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[]
-                {
-                    ComponentType.ReadOnly<PrefabData>(),
-                    ComponentType.ReadWrite<TransportDepotData>(),
-                }
-            });
+            m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            m_DepotQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(),
+                ComponentType.ReadWrite<TransportDepotData>());
+            s_Instances.Add(this);
         }
 
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
         {
             base.OnGameLoadingComplete(purpose, mode);
-            if (mode == GameMode.Game && (purpose == Purpose.NewGame || purpose == Purpose.LoadGame))
-            {
-                s_Originals.Clear();
-            }
-            s_PendingApply = true;
+            if (mode == GameMode.Game) m_PendingApply = true;
+            // Do not discard baselines just because another city was loaded.
         }
 
         protected override void OnUpdate()
         {
-            if (!s_PendingApply && !s_PendingRestore) return;
-
-            bool restore = s_PendingRestore;
-            s_PendingApply = false;
-            s_PendingRestore = false;
-
-            try
-            {
-                Apply(restore);
-            }
-            catch (Exception e)
-            {
-                Mod.s_Log.Error(e, "DepotCapacitySystem.Apply 失败");
-            }
+            if (!m_Active || !m_PendingApply) return;
+            m_PendingApply = false;
+            try { m_PendingApply = !Apply(); }
+            catch (Exception e) { Mod.s_Log.Error(e, "DepotCapacitySystem.Apply 失败"); }
         }
 
-        private void Apply(bool restore)
+        protected override void OnDestroy()
         {
-            if (m_DepotQuery.IsEmptyIgnoreFilter) return;
+            RestoreNow();
+            m_Originals.Clear();
+            s_Instances.Remove(this);
+            base.OnDestroy();
+        }
 
-            Setting s = Mod.s_Setting;
-            bool enable = s == null || (s.EnableUnlock && s.ScaleDepotCapacity);
-            float k = s == null ? 1f : Math.Max(1, Math.Min(10, s.DepotMultiplier));
-
-            if (restore || !enable || k <= 1f)
+        private bool Apply()
+        {
+            if (m_DepotQuery.IsEmptyIgnoreFilter) return false;
+            var setting = Mod.s_Setting;
+            int multiplier = setting == null ? 1 : Math.Max(1, Math.Min(10, setting.DepotMultiplier));
+            if (setting == null || !setting.EnableUnlock || !setting.ScaleDepotCapacity || multiplier == 1)
             {
-                RestoreAll();
-                return;
+                RestoreNow();
+                return true;
             }
 
-            NativeArray<Entity> entities = m_DepotQuery.ToEntityArray(Allocator.Temp);
-            NativeArray<TransportDepotData> depots = m_DepotQuery.ToComponentDataArray<TransportDepotData>(Allocator.Temp);
-
+            EntityManager.CompleteAllTrackedJobs();
             int changed = 0;
-
-            for (int i = 0; i < entities.Length; i++)
+            using (var entities = m_DepotQuery.ToEntityArray(Allocator.Temp))
             {
-                Entity e = entities[i];
-                TransportDepotData d = depots[i];
-
-                // 只放大客运车库；Post / Helicopter / Work / Bicycle / Car 等不动。
-                if (!IsPassengerDepot(d.m_TransportType)) continue;
-
-                if (!s_Originals.TryGetValue(e, out int original))
+                foreach (Entity entity in entities)
                 {
-                    original = d.m_VehicleCapacity;
-                    s_Originals[e] = original;
-                }
+                    var depot = EntityManager.GetComponentData<TransportDepotData>(entity);
+                    if (!IsPassengerDepot(depot.m_TransportType)) continue;
+                    var prefab = m_PrefabSystem.GetPrefab<PrefabBase>(entity);
+                    if (!m_Originals.TryGetValue(entity, out var snapshot) ||
+                        !ReferenceEquals(snapshot.Prefab, prefab))
+                    {
+                        snapshot = new Snapshot { Prefab = prefab, Capacity = depot.m_VehicleCapacity };
+                        m_Originals[entity] = snapshot;
+                    }
 
-                int target = (int)Math.Round(original * (double)k);
-                if (target < 1) target = 1;
-
-                if (d.m_VehicleCapacity != target)
-                {
-                    d.m_VehicleCapacity = target;
-                    depots[i] = d;
+                    int target = (int)Math.Max(1L, Math.Min(int.MaxValue, (long)snapshot.Capacity * multiplier));
+                    if (depot.m_VehicleCapacity == target) continue;
+                    depot.m_VehicleCapacity = target;
+                    EntityManager.SetComponentData(entity, depot);
                     changed++;
                 }
             }
+            Mod.s_Log.Info($"[车库] 初始容量 x{multiplier}，改动 {changed} 个 prefab");
+            return true;
+        }
 
-            if (changed > 0)
+        private void RestoreNow()
+        {
+            if (m_Originals.Count == 0) return;
+            try
             {
-                m_DepotQuery.CopyFromComponentDataArray(depots);
-                Mod.s_Log.Info($"[车库] 缩放 x{k}，改动 {changed} 个车库 prefab（共 {entities.Length}）");
+                if (!World.IsCreated) return;
+                EntityManager.CompleteAllTrackedJobs();
+                int restored = 0;
+                foreach (var pair in m_Originals)
+                {
+                    Entity entity = pair.Key;
+                    if (!EntityManager.Exists(entity) ||
+                        !EntityManager.HasComponent<TransportDepotData>(entity) ||
+                        !ReferenceEquals(m_PrefabSystem.GetPrefab<PrefabBase>(entity), pair.Value.Prefab)) continue;
+                    var depot = EntityManager.GetComponentData<TransportDepotData>(entity);
+                    if (depot.m_VehicleCapacity == pair.Value.Capacity) continue;
+                    depot.m_VehicleCapacity = pair.Value.Capacity;
+                    EntityManager.SetComponentData(entity, depot);
+                    restored++;
+                }
+                if (restored > 0) Mod.s_Log.Info($"[车库] 已同步还原 {restored} 个 prefab");
             }
-
-            entities.Dispose();
-            depots.Dispose();
+            catch (Exception e) { Mod.s_Log.Error(e, "车库容量同步还原失败"); }
         }
 
         private static bool IsPassengerDepot(TransportType type)
@@ -133,44 +151,11 @@ namespace VehicleCapUnlock.Systems
                 case TransportType.Train:
                 case TransportType.Ship:
                 case TransportType.Ferry:
-                case TransportType.Taxi:
                 case TransportType.Airplane:
                     return true;
                 default:
                     return false;
             }
-        }
-
-        private void RestoreAll()
-        {
-            if (s_Originals.Count == 0) return;
-
-            NativeArray<Entity> entities = m_DepotQuery.ToEntityArray(Allocator.Temp);
-            NativeArray<TransportDepotData> depots = m_DepotQuery.ToComponentDataArray<TransportDepotData>(Allocator.Temp);
-
-            int restored = 0;
-
-            for (int i = 0; i < entities.Length; i++)
-            {
-                if (!s_Originals.TryGetValue(entities[i], out int original)) continue;
-
-                TransportDepotData d = depots[i];
-                if (d.m_VehicleCapacity != original)
-                {
-                    d.m_VehicleCapacity = original;
-                    depots[i] = d;
-                    restored++;
-                }
-            }
-
-            if (restored > 0)
-            {
-                m_DepotQuery.CopyFromComponentDataArray(depots);
-                Mod.s_Log.Info($"[车库] 还原 {restored} 个车库 prefab 为原版容量");
-            }
-
-            entities.Dispose();
-            depots.Dispose();
         }
     }
 }

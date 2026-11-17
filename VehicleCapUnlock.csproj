@@ -8,6 +8,7 @@
 		<AssemblyName>VehicleCapUnlock</AssemblyName>
 		<RootNamespace>VehicleCapUnlock</RootNamespace>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<DeployOnBuild Condition="'$(DeployOnBuild)' == ''">false</DeployOnBuild>
 
 		<!-- 游戏托管程序集目录。默认按本机 Steam 库路径，装到别处就改这里。 -->
 		<ManagedPath Condition="'$(ManagedPath)' == ''">E:\SteamLibrary\steamapps\common\Cities Skylines II\Cities2_Data\Managed</ManagedPath>
@@ -29,6 +30,11 @@
 
 	<ItemGroup Condition="'$(UseToolchain)' == 'false'">
 		<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Remove="tests\**\*.cs" />
+		<Compile Remove=".tools\**\*.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -85,9 +91,9 @@
 	</ItemGroup>
 
 	<!-- 降级路线下手工部署到本地 Mods 目录 -->
-	<Target Name="DeployToLocalMods" AfterTargets="Build" Condition="'$(UseToolchain)' == 'false'">
+	<Target Name="DeployToLocalMods" AfterTargets="Build" Condition="'$(UseToolchain)' == 'false' And '$(DeployOnBuild)' == 'true'">
 		<PropertyGroup>
-			<LocalModDir>$(USERPROFILE)\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\VehicleCapUnlock</LocalModDir>
+			<LocalModDir Condition="'$(LocalModDir)' == ''">$(USERPROFILE)\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\VehicleCapUnlock</LocalModDir>
 		</PropertyGroup>
 		<MakeDir Directories="$(LocalModDir)" />
 		<Copy SourceFiles="$(TargetPath)" DestinationFolder="$(LocalModDir)" />
